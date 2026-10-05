@@ -108,7 +108,66 @@ pytest -v
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-Interactive Swagger API docs available at: `http://localhost:8000/docs`
+Interactive Swagger API docs at `http://localhost:8000/docs`, ReDoc at `/redoc`.
+
+> **Calling protected endpoints from Swagger UI:** click **Authorize**, paste the
+> client API key, then press the **Authorize** button to apply it. Closing the
+> dialog with **Close** discards the key and every request will return 401.
+> The `/docs` page is served from local static assets, which is why
+> `app/static/swagger-ui-standalone-preset.js` must be present — without it the
+> Authorize button silently fails to render.
+
+---
+
+## 🐳 Deployment (Docker Compose)
+
+Deployed instance: **https://dev.app-cube.tech** (VPS `187.77.126.196`).
+
+nginx terminates TLS for `dev.app-cube.tech` and reverse-proxies to the API on
+`127.0.0.1:8010`. The API port is bound to **loopback only**, so the container
+is never directly reachable from the internet. Postgres runs in a second
+container on a private bridge network and publishes **no** ports.
+
+```bash
+# On the VPS
+cd /srv/mybogaMidFastAPi
+cp .env.production.example .env   # then fill in real values; chmod 600 .env
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Keep the `api` service at a **single replica**: APScheduler runs in-process,
+so additional replicas would double-fire the expiry and auto-checkout jobs.
+
+### Production-safety flags
+
+`NO_SHOW_EXPIRY_ENABLED` and `ALLOW_PAST_VISIT_START` must stay `true` /
+`false` on any publicly reachable host:
+
+| Flag | Unsafe value | Risk |
+|---|---|---|
+| `NO_SHOW_EXPIRY_ENABLED=false` | disables no-show revocation | abandoned door credentials stay **permanently valid** at the reader |
+| `ALLOW_PAST_VISIT_START=true` | accepts past start times | creates bookings that are born expired; API returns 201 for a booking the scheduler immediately destroys |
+
+Both default to production-safe values, so a fresh deploy is secure unless
+explicitly overridden. Localhost testing may flip them temporarily.
+
+### Accessing the database
+
+The database is **not** exposed. Use the SSH tunnel alias:
+
+```bash
+ssh -N vps-db        # localhost:25432 -> container:5432
+```
+
+pgAdmin fields: host `127.0.0.1`, port `25432`, database/user `myboga`,
+password from `POSTGRES_PASSWORD` in the server's `.env`.
+
+Alternatively configure pgAdmin's built-in **Use SSH tunnel** (identity file
+`~/.ssh/id_ed25519_nuveqdb`) so it manages the tunnel per connection.
+
+> `172.16.5.2` is the Docker bridge IP and **changes whenever the container is
+> recreated**. Re-check with
+> `docker inspect -f '{{.IPAddress}}' mybogamidfastapi-db` after a redeploy.
 
 ---
 

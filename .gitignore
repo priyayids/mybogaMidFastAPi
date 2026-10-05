@@ -31,7 +31,13 @@ ENV/
 *.sqlite3
 
 # Environment
+# Ignore every real env file, including variants like .envProd / .env.local /
+# .env.production, while keeping the committed templates.
 .env
+.env.*
+.env*
+!.env.example
+!.env.production.example
 
 # Testing & Coverage
 .pytest_cache/

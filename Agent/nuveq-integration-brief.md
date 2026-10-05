@@ -439,9 +439,19 @@ curl -X POST "https://api-v2.nuveq.cloud/api/webhooks" \
   -H "Content-Type: application/json" \
   -d '{
         "enable": true,
-        "webhookLink": "https://api.our-service.com/webhooks/nuveq/<secret>"
+        "webhookLink": "https://dev.app-cube.tech/api/v1/webhooks/nuveq/<secret>"
       }'
 ```
+
+> **The `/api/v1` prefix is required.** The service mounts the v1 router at
+> `/api/v1` (see `app/main.py`), so the real path is
+> `/api/v1/webhooks/nuveq/{secret}`. A link without the prefix returns 404 for
+> every delivery.
+
+> **There is no read endpoint.** `GET /api/webhooks` returns 404 and the
+> Nuveq OpenAPI spec exposes `POST` only, so the currently configured
+> `webhookLink` cannot be inspected via the API — check the Nuveq dashboard
+> before overwriting.
 
 3. Expected response: `{"error":0,"message":"Success","data":{"ownerId":174,"enable":true,"webhookLink":"..."}}`
 4. **Test:** tap the reader → check our service logs for the incoming POST. (We already did this against webhook.site — see §2.4 for the captured payload.)

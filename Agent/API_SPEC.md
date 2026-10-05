@@ -1,6 +1,12 @@
 # Middle Service API Specification
 
-Base URL: `http://localhost:8000/api/v1`
+Base URL (local): `http://localhost:8000/api/v1`
+Base URL (deployed): `https://dev.app-cube.tech/api/v1`
+
+Interactive docs: `/docs` (Swagger UI) and `/redoc`.
+To call protected endpoints from Swagger UI, use **Authorize** and supply the
+client API key, then "Try it out" → Execute. Closing the dialog without
+pressing Authorize discards the key and requests will return 401.
 
 ## 1. Authentication
 
@@ -8,10 +14,18 @@ Client endpoints expect:
 ```http
 X-Client-API-Key: <CLIENT_API_KEY>
 ```
+The key is matched by exact string comparison (`app/core/security.py`). There
+is no hashing, trimming, or case folding, and `CLIENT_API_KEYS` accepts a
+comma-separated list. Missing or unknown keys return `401`.
+
 Nuveq webhooks authenticate using the path token:
 ```http
 POST /api/v1/webhooks/nuveq/{webhook_secret_token}
 ```
+
+> The secret is a **URL path segment**. It must not contain `/`, and must be
+> URL-safe. Nuveq sends no HMAC signature, so this path token plus an optional
+> Nuveq egress IP allowlist is the entire trust boundary for inbound events.
 
 ---
 
@@ -114,8 +128,28 @@ POST /api/v1/webhooks/nuveq/{webhook_secret_token}
 
 ### 4.1 Nuveq Inbound Webhook
 - **POST** `/webhooks/nuveq/{secret_token}`
-- Accepts Nuveq raw tap / status payload.
-- Returns `{ "received": true, "uuid": "<event_uuid>" }` fast.
+- Full path: `https://dev.app-cube.tech/api/v1/webhooks/nuveq/{secret_token}`
+  (note the `/api/v1` prefix — omitting it 404s).
+- Accepts Nuveq raw tap / status payload. Responds fast with
+  `{ "received": true, "uuid": "...", "processed": true }`.
+- Deduplicated on the payload `uuid`. A replay returns
+  `"Duplicate event ignored"` with `processed: false`.
+- Only `name == "Valid visitor"` drives booking state
+  (`BOOKED → CHECKED_IN → CHECKED_OUT`). All other event types are still
+  persisted and marked processed.
+
+Two rows are written per accepted event:
+
+| Table | Contents |
+|---|---|
+| `tap_events` | Full event log, including the complete `raw_payload` JSON |
+| `idempotency_records` | Dedup key (`key` = event `uuid`) |
+
+`bookings` is updated only for valid-visitor taps. Neither table is exposed
+over HTTP — inspect them directly in Postgres.
+
+> There is currently no retention/TTL job, so `tap_events` and
+> `idempotency_records` grow without bound and idempotency keys never expire.
 
 ### 4.2 Client Webhook Notification Configuration
 - **POST** `/webhooks/client-config`
@@ -126,6 +160,12 @@ POST /api/v1/webhooks/nuveq/{webhook_secret_token}
   "is_active": true
 }
 ```
+- **GET** `/webhooks/client-config` lists registrations.
+- No per-ID route exists: every POST adds a row and *all* active rows are
+  notified, so entries cannot be updated or deleted via the API.
+- Note: **manual booking cancellation dispatches no client webhook**, unlike
+  no-show expiry and auto-checkout. Clients must re-fetch room status after a
+  `DELETE /bookings/{id}` or their dashboard will show a stale `BOOKED`.
 
 ---
 
@@ -137,3 +177,17 @@ Endpoints enabling the client admin to discover available doors, controllers, an
 - **GET** `/nuveq/doors`
 - **GET** `/nuveq/lift-groups`
 - **POST** `/nuveq/setup-webhook` (Configures account-level webhook URL on Nuveq Cloud)
+
+```json
+{
+  "webhook_url": "https://dev.app-cube.tech/api/v1/webhooks/nuveq/<secret>",
+  "enable": true,
+  "backup_webhook_url": null
+}
+```
+
+> **Registering this overwrites any webhook already configured on the Nuveq
+> account, and Nuveq exposes no way to read the current value back**
+> (`GET /api/webhooks` returns 404; the OpenAPI spec lists `POST` only).
+> One webhook per account is supported, plus one optional `webhookLink2`.
+> Check the Nuveq dashboard for an existing webhook before calling this.

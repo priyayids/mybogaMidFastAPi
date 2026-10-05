@@ -116,3 +116,18 @@ async def async_client(db_session: AsyncSession, mock_nuveq_client: MockNuveqApi
 @pytest.fixture
 def auth_headers() -> dict:
     return {"X-Client-API-Key": "client-dev-key-123"}
+
+
+@pytest.fixture(autouse=True)
+def allow_past_visit_start_for_tests():
+    """Let tests build bookings with a start time in the past.
+
+    Several tests (expiry, webhook ingestion) need bookings that begin before
+    "now". ALLOW_PAST_VISIT_START defaults to False and is read from the
+    developer's local .env, so without this the suite silently depends on
+    whether testing flags are enabled. Tests must not depend on that.
+    """
+    original = settings.ALLOW_PAST_VISIT_START
+    settings.ALLOW_PAST_VISIT_START = True
+    yield
+    settings.ALLOW_PAST_VISIT_START = original
