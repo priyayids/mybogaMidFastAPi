@@ -107,7 +107,26 @@ async def custom_swagger_ui_html():
         swagger_js_url="/static/swagger-ui-bundle.js",
         swagger_css_url="/static/swagger-ui.css",
     )
-    return HTMLResponse(content=response.body.decode("utf-8"))
+    html = response.body.decode("utf-8")
+    # swagger-ui-bundle.js does not contain the standalone preset; it ships as a
+    # separate file. Without it, SwaggerUIStandalonePreset is undefined and the
+    # Authorize button (AuthorizeBtnContainer) never renders, so the
+    # X-Client-API-Key can never be attached to "Try it out" requests.
+    html = html.replace(
+        '<script src="/static/swagger-ui-bundle.js"></script>',
+        '<script src="/static/swagger-ui-bundle.js"></script>\n'
+        '    <script src="/static/swagger-ui-standalone-preset.js"></script>',
+    )
+    # swagger-ui-standalone-preset.js assigns a global SwaggerUIStandalonePreset
+    # that is ALREADY the resolved preset object (the file invokes its factory at
+    # definition time), so it must be referenced bare: calling it with () throws
+    # "SwaggerUIStandalonePreset is not a function" and the Authorize button
+    # (AuthorizeBtnContainer) never renders.
+    html = html.replace(
+        "SwaggerUIBundle.SwaggerUIStandalonePreset\n",
+        "SwaggerUIStandalonePreset\n",
+    )
+    return HTMLResponse(content=html)
 
 
 @app.get("/redoc", include_in_schema=False)
